@@ -35,12 +35,14 @@ def lead_by_article(inputs):
 	if inputs["SF_INSTANCE"] == "dev":
 		RF_URL = "https://test.salesforce.com/services/oauth2/token"
 		SF_URL = "https://wrightsmedia--wrightsdev.my.salesforce.com/services/data/"
+		SF_FOLDER = "00l0f000002BOduAAG"
 		RF_KEY = "3MVG93MGy9V8hF9P5tOvZXvSk6YdouzlN5M2wsFr82GfKPFAZK9G0v4Kt7WEyik2lLeW46_KwAhnK1NrUgSn4"
 		RF_SECRET = "3C0FFEE636183C52084EF72BCB823FEDE84BE5E8323AF9DFBEDA6F459AAB08E1"
 		RF_TOKEN = "5Aep861nwwtoVPEij_zqtjVW0Zq3uKlUCSmgu..M9IGINAjdRK_u13KrIkCEq2FohL5jPybG1zbq6eHNOrbrb_K"
 	if inputs["SF_INSTANCE"] == "prod":
 		RF_URL = "https://login.salesforce.com/services/oauth2/token"
 		SF_URL = "https://wrightsmedia.my.salesforce.com/services/data/"
+		SF_FOLDER = "00l6f000002O5eJ"
 		RF_KEY = "3MVG9i1HRpGLXp.rDSE.v3G1rnFU5MZ79Fw4x8PNSlHJOxc4O4rTr8kuRlr297VT_nzVuSwKE5EFC1iOUih4i"
 		RF_SECRET = "ECE599BE6185D483469DC9143C2E8C05FCE715CCD24FE3AE4021DB7A415754DB"
 		RF_TOKEN = "5Aep8612E5JLxJp3ET7HLynuJxh07GDEsxdUIDvzOit9LoccvM60Ym3.lyC8C3qGZdaa4_GropJQRLJ855EL4hr"
@@ -61,7 +63,7 @@ def lead_by_article(inputs):
 			j= r.json()
 		record = j["results"][0]
 	except Exception as err:
-		error_message = "PROD ERROR attempting to query Discovery with article id: " + inputs["article_id"]
+		error_message = inputs["SF_INSTANCE"].upper() + " ERROR attempting to query Discovery with article id: " + inputs["article_id"]
 		print(error_message, err)
 		print("JSON:",j)
 		#email_error(inputs["email_address"], "", "", "", error_message)
@@ -71,8 +73,9 @@ def lead_by_article(inputs):
 	pdf_url = ""
 	if(build_pdf(record,inputs["COS_APIKEY"])):
 		merge_pdf(record["id"]+'_base.pdf')
-		#email_pdf(record,inputs["email_address"])
-		pdf_url = salesforce_pdf(sf_token,SF_URL,record)
+		if inputs["SF_INSTANCE"] == "dev":
+			email_pdf(record,inputs["email_address"])
+		pdf_url = salesforce_pdf(sf_token,SF_URL,record,SF_FOLDER)
 	
 	#print(record)
 	entity_output = ""
@@ -154,7 +157,7 @@ def lead_by_article(inputs):
 	#print("SALES REP:", sales_rep)
 	
 	if mag_id == "":
-		error_message = "PROD ERROR finding magazine in SalesForce. PUB: " + record["metadata"]["publisher"] + " MAG: " + record["metadata"]["feed_name"]
+		error_message = inputs["SF_INSTANCE"].upper() + " ERROR finding magazine in SalesForce. PUB: " + record["metadata"]["publisher"] + " MAG: " + record["metadata"]["feed_name"]
 		print(error_message)
 		#email_error(inputs["email_address"], record["metadata"]["title"], record["metadata"]["publisher"], record["metadata"]["feed_name"], error_message)
 		raise Exception(error_message)
@@ -184,13 +187,13 @@ def lead_by_article(inputs):
 	headers = {"Content-Type": "application/json", "Authorization": "Bearer " + sf_token}
 	r = requests.post(SF_URL+"v39.0/sobjects/Lead", headers=headers, data=data)
 	if r.status_code != 200 and r.status_code != 201:
-		error_message = "PROD ERROR during Lead creation in SalesForce. PUB: " + record["metadata"]["publisher"] + " MAG: " + record["metadata"]["feed_name"]
+		error_message = inputs["SF_INSTANCE"].upper() + " ERROR during Lead creation in SalesForce. PUB: " + record["metadata"]["publisher"] + " MAG: " + record["metadata"]["feed_name"]
 		#email_error(inputs["email_address"], record["metadata"]["title"], record["metadata"]["publisher"], record["metadata"]["feed_name"], error_message)
 		raise Exception(error_message)
 	else:
 		# Update Discovery record with SalesForce Lead information
 		j = r.json()
-		print("PROD LEAD CREATED WITH MAG:",record["metadata"]["feed_name"],"PUB:",record["metadata"]["publisher"],"TITLE:",title,"ID:", j["id"])
+		print(inputs["SF_INSTANCE"].upper() + " LEAD CREATED WITH MAG:",record["metadata"]["feed_name"],"PUB:",record["metadata"]["publisher"],"TITLE:",title,"ID:", j["id"])
 		record["metadata"]["salesforce_id"] = j["id"]
 		record["metadata"]["salesforce_timestamp"] = str(int(datetime.now(tz=timezone.utc).timestamp() * 1000))
 		UPDATE = "?version=2019-04-30"
@@ -203,18 +206,18 @@ def lead_by_article(inputs):
 				r.raise_for_status()
 			except Exception as ex:
 				if attempts > 1:
-					print("PROD LEAD UPDATE TO DISCOVERY FAILED WITH STATUS CODE" + str(r.status_code) + ": " + ex)
+					print(inputs["SF_INSTANCE"].upper() + " LEAD UPDATE TO DISCOVERY FAILED WITH STATUS CODE" + str(r.status_code) + ": " + ex)
 					print("FULL RESPONSE:",r.text)
 					print("METADATA:",record["metadata"])
 					raise
 				else:
-					print("PROD First Try Failure, Retrying in " + str(time_out) + "seconds to upload...")
+					print(inputs["SF_INSTANCE"].upper() + " First Try Failure, Retrying in " + str(time_out) + "seconds to upload...")
 					time.sleep(time_out)
 					time_out = time_out ** 2
 					attempts += 1
 					continue
 			break
-		print("PROD LEAD UPDATE DISCOVERY RESULTS",r.text,"METADATA:",record["metadata"])
+		print(inputs["SF_INSTANCE"].upper() + " LEAD UPDATE DISCOVERY RESULTS",r.text,"METADATA:",record["metadata"])
 		if inputs["sql_db_enabled"]:
 			# Update SQL DB with values from Discovery
 			try:
@@ -239,7 +242,7 @@ def lead_by_article(inputs):
 				j = r.json()
 				print("SQL DB RESULTS:",str(j))
 			except Exception as e:
-				print("PROD SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + e.message)
+				print(inputs["SF_INSTANCE"].upper() + " SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + e.message)
 				print("PAYLOAD:",payload)
 		return {'message': "Successfully created lead"}
 
@@ -529,9 +532,9 @@ def get_logo(logo_name, token):
 # @PARAM: sf_token - token to authenticate with Salesforce
 # @PARAM: sf_url - base URL for Salesforce
 # @PARAM: record - dictionary of article data
+# @PARAM: folder_id - Salesforce id of folder where PDF is uploaded
 # @RET: String of URL to Salesforce Document
-def salesforce_pdf(sf_token,sf_url,record):
-	folder_id = "00l6f000002O5eJ"
+def salesforce_pdf(sf_token,sf_url,record,folder_id):
 	pdf_file = record['id']+'.pdf'
 	try:
 		QUERY = "v23.0/sobjects/Document/"
