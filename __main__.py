@@ -349,7 +349,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 	sales_rep = ""
 	
 	try:
-		QUERY = "v20.0/query/?q=SELECT+Account_Id_18__c+from+Account+where+Name+like+'" + re.sub(r'\&','%26',re.sub(r"'", "\\'", publisher)) +"'"
+		QUERY = "v23.0/query/?q=SELECT+Account_Id_18__c+from+Account+where+Name+like+'" + re.sub(r'\&','%26',re.sub(r"'", "\\'", publisher)) +"'"
 		headers = {"Authorization": "Bearer " + sf_token}
 		r = requests.get(SF_URL+QUERY, headers=headers)
 		r.raise_for_status()
@@ -366,7 +366,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 		print("Got response but could not find publisher in SalesForce", err)
 	
 	try:
-		QUERY = "v20.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Name+like+'" + re.sub(r'\&','%26',re.sub(r"'","\\'", magazine)) +"'"
+		QUERY = "v23.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Name+like+'" + re.sub(r'\&','%26',re.sub(r"'","\\'", magazine)) +"'"
 		headers = {"Authorization": "Bearer " + sf_token}
 		r = requests.get(SF_URL+QUERY, headers=headers)
 		r.raise_for_status()
