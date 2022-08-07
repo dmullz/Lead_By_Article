@@ -18,7 +18,6 @@ import os
 from datetime import timezone, datetime
 import fpdf
 from fpdf import FPDF
-import PyPDF2
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -35,14 +34,12 @@ def lead_by_article(inputs):
 	if inputs["SF_INSTANCE"] == "dev":
 		RF_URL = "https://test.salesforce.com/services/oauth2/token"
 		SF_URL = "https://wrightsmedia--wrightsdev.my.salesforce.com/services/data/"
-		SF_FOLDER = "00l0f000002BOduAAG"
 		RF_KEY = "3MVG93MGy9V8hF9P5tOvZXvSk6YdouzlN5M2wsFr82GfKPFAZK9G0v4Kt7WEyik2lLeW46_KwAhnK1NrUgSn4"
 		RF_SECRET = "3C0FFEE636183C52084EF72BCB823FEDE84BE5E8323AF9DFBEDA6F459AAB08E1"
 		RF_TOKEN = "5Aep861nwwtoVPEij_zqtjVW0Zq3uKlUCSmgu..M9IGINAjdRK_u13KrIkCEq2FohL5jPybG1zbq6eHNOrbrb_K"
 	if inputs["SF_INSTANCE"] == "prod":
 		RF_URL = "https://login.salesforce.com/services/oauth2/token"
 		SF_URL = "https://wrightsmedia.my.salesforce.com/services/data/"
-		SF_FOLDER = "00l6f000002O5eJ"
 		RF_KEY = "3MVG9i1HRpGLXp.rDSE.v3G1rnFU5MZ79Fw4x8PNSlHJOxc4O4rTr8kuRlr297VT_nzVuSwKE5EFC1iOUih4i"
 		RF_SECRET = "ECE599BE6185D483469DC9143C2E8C05FCE715CCD24FE3AE4021DB7A415754DB"
 		RF_TOKEN = "5Aep8612E5JLxJp3ET7HLynuJxh07GDEsxdUIDvzOit9LoccvM60Ym3.lyC8C3qGZdaa4_GropJQRLJ855EL4hr"
@@ -63,20 +60,16 @@ def lead_by_article(inputs):
 			j= r.json()
 		record = j["results"][0]
 	except Exception as err:
-		error_message = inputs["SF_INSTANCE"].upper() + " ERROR attempting to query Discovery with article id: " + inputs["article_id"]
+		error_message = "DEV ERROR attempting to query Discovery with article id: " + inputs["article_id"]
 		print(error_message, err)
-		print("JSON:",j)
-		#email_error(inputs["email_address"], "", "", "", error_message)
+		email_error(inputs["email_address"], "", "", "", error_message)
 		
 		raise
 	
 	pdf_url = ""
 	if(build_pdf(record,inputs["COS_APIKEY"])):
-		merge_pdf(record["id"]+'_base.pdf')
-		if inputs["SF_INSTANCE"] == "dev":
-			email_pdf(record,inputs["email_address"])
-		pdf_url = salesforce_pdf(sf_token,SF_URL,record,SF_FOLDER)
-	
+		email_pdf(record,inputs["email_address"])
+		pdf_url = salesforce_pdf(sf_token,SF_URL,record)
 	#print(record)
 	entity_output = ""
 	featured_company = "None"
@@ -87,7 +80,8 @@ def lead_by_article(inputs):
 	products = []
 	people = []
 	product = ""
-	title = record["metadata"]["title"]
+	title = re.sub(r'[^A-Za-z0-9\s\-\:]',"",record["metadata"]["title"])
+	#print("TITLE IS: ", title)
 	date = record["metadata"]["pub_date"]
 	
 	if "entities" in record["enriched_text"] and len(record["enriched_text"]["entities"]) > 0:
@@ -148,7 +142,7 @@ def lead_by_article(inputs):
 				product = sorted_e[0][0]
 			else:
 				product = ""
-			    
+			
 	#Query Salesforce to find field IDs
 	ids = query_salesforce(record["metadata"]["publisher"], record["metadata"]["feed_name"],SF_URL,RF_URL,RF_KEY,RF_SECRET,RF_TOKEN)
 	pub_id = ids[0]
@@ -157,94 +151,78 @@ def lead_by_article(inputs):
 	#print("SALES REP:", sales_rep)
 	
 	if mag_id == "":
-		error_message = inputs["SF_INSTANCE"].upper() + " ERROR finding magazine in SalesForce. PUB: " + record["metadata"]["publisher"] + " MAG: " + record["metadata"]["feed_name"]
+		error_message = "DEV ERROR finding magazine in SalesForce. PUB: " + record["metadata"]["publisher"] + " MAG: " + record["metadata"]["feed_name"]
 		print(error_message)
-		#email_error(inputs["email_address"], record["metadata"]["title"], record["metadata"]["publisher"], record["metadata"]["feed_name"], error_message)
+		email_error(inputs["email_address"], title, record["metadata"]["publisher"], record["metadata"]["feed_name"], error_message)
 		raise Exception(error_message)
+		
+	salesforce_ids = {}
 	
-	# Build SalesForce payload and create lead
-	data = json.dumps({"Company": featured_company,
-						"LastName": "RSS Sentiment Analysis",
-						"LeadSource": "RSS Project",
-						"Rating": record["metadata"]["lead_classifier"] * 100,
-						"Description": "Title: " + title +
-									  "\nSentiment Score: " + str(record["enriched_text"]["sentiment"]["document"]["score"]) +
-									  "\nClassifier Score: " + str(record["metadata"]["lead_classifier"]) +
-									  "\nFeatured Product: " + product +
-									  "\nEntities:\n" + entity_output,
-						'Sales_Rep__c': sales_rep,
-						'Magazine__c': mag_id,
-						'Web_Link__c': record["metadata"]["url"],
-						'Magazine_Type__c': "Online",
-						'Publisher__c': pub_id,
-						'Issue_Date__c': time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(record["metadata"]["pub_date"]/1000)),
-						'Article_Title__c': title,
-						'Featured_Product__c': product,
-						'Winning_Company__c': featured_company,
-						'Company_Short_Name__c': featured_company,
-						'Published_Rating__c': record["metadata"]["lead_classifier"] * 100,
-						'RSS_PDF__c': pdf_url})
-	headers = {"Content-Type": "application/json", "Authorization": "Bearer " + sf_token}
-	r = requests.post(SF_URL+"v39.0/sobjects/Lead", headers=headers, data=data)
-	if r.status_code != 200 and r.status_code != 201:
-		error_message = inputs["SF_INSTANCE"].upper() + " ERROR during Lead creation in SalesForce. PUB: " + record["metadata"]["publisher"] + " MAG: " + record["metadata"]["feed_name"]
-		#email_error(inputs["email_address"], record["metadata"]["title"], record["metadata"]["publisher"], record["metadata"]["feed_name"], error_message)
-		raise Exception(error_message)
-	else:
-		# Update Discovery record with SalesForce Lead information
-		j = r.json()
-		print(inputs["SF_INSTANCE"].upper() + " LEAD CREATED WITH MAG:",record["metadata"]["feed_name"],"PUB:",record["metadata"]["publisher"],"TITLE:",title,"ID:", j["id"])
-		record["metadata"]["salesforce_id"] = j["id"]
-		record["metadata"]["salesforce_timestamp"] = str(int(datetime.now(tz=timezone.utc).timestamp() * 1000))
-		UPDATE = "?version=2019-04-30"
-		files={"file": record["html"].encode('utf-8'), "metadata": json.dumps(record["metadata"])}
-		time_out = 5
-		attempts = 1
-		while True:
-			try:
-				r = requests.post(inputs["DISC_BASE_URL"] + inputs["COLLECTION_ID"] + "/documents/" + inputs["article_id"] + UPDATE, auth=(inputs["DISC_USER"], inputs["DISC_PASS"]), files=files)
-				r.raise_for_status()
-			except Exception as ex:
-				if attempts > 1:
-					print(inputs["SF_INSTANCE"].upper() + " LEAD UPDATE TO DISCOVERY FAILED WITH STATUS CODE" + str(r.status_code) + ": " + ex)
-					print("FULL RESPONSE:",r.text)
-					print("METADATA:",record["metadata"])
-					raise
-				else:
-					print(inputs["SF_INSTANCE"].upper() + " First Try Failure, Retrying in " + str(time_out) + "seconds to upload...")
-					time.sleep(time_out)
-					time_out = time_out ** 2
-					attempts += 1
-					continue
-			break
-		print(inputs["SF_INSTANCE"].upper() + " LEAD UPDATE DISCOVERY RESULTS",r.text,"METADATA:",record["metadata"])
-		if inputs["sql_db_enabled"]:
-			# Update SQL DB with values from Discovery
-			try:
-				payload = { "article_title": record['metadata']['title'],
-							"article_publisher": record['metadata']['publisher'],
-							"article_magazine": record['metadata']['feed_name'],
-							"article_url": record['metadata']['url'],
-							"lead_classifier": record['metadata']['lead_classifier'],
-							"article_pubdate": record['metadata']['pub_date'],
-							"article_text": record['text'],
-							"salesforce_timestamp": record["metadata"]["salesforce_timestamp"],
-							"salesforce_id": record["metadata"]["salesforce_id"],
-							"discovery_id": record["id"],
-							"sentiment_score": record["metadata"]["sentiment_score"],
-							"emotion_score": str(record["enriched_text"]["emotion"]["document"]["emotion"]),
-							"entities": str(record["enriched_text"]["entities"]),
-							"id": int(record["metadata"]["sqldb_id"])
-							}
-				params={'apikey': inputs["sql_db_apikey"]}
-				r = requests.put(inputs["sql_db_url"], params=params, json=payload)
-				r.raise_for_status()
-				j = r.json()
-				print("SQL DB RESULTS:",str(j))
-			except Exception as e:
-				print(inputs["SF_INSTANCE"].upper() + " SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + e.message)
-				print("PAYLOAD:",payload)
-		return {'message': "Successfully created lead"}
+	if len(companies) < 1:
+		companies.append((featured_company, 0.0))
+	
+	for com in companies:
+		# Build SalesForce payload and create lead
+		print("CURRENT COMPANY:", com[0])
+		data = json.dumps({"Company": com[0],
+							"LastName": "RSS Sentiment Analysis",
+							"LeadSource": "RSS Project",
+							"Rating": record["metadata"]["lead_classifier"] * 100,
+							"Description": "Title: " + title +
+										"\nSentiment Score: " + str(record["enriched_text"]["sentiment"]["document"]["score"]) +
+										"\nClassifier Score: " + str(record["metadata"]["lead_classifier"]) +
+										"\nFeatured Product: " + product +
+										"\nEntities:\n" + entity_output,
+							'Sales_Rep__c': sales_rep,
+							'Magazine__c': mag_id,
+							'Web_Link__c': record["metadata"]["url"],
+							'Magazine_Type__c': "Online",
+							'Publisher__c': pub_id,
+							'Issue_Date__c': time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(record["metadata"]["pub_date"]/1000)),
+							'Article_Title__c': title,
+							'Featured_Product__c': product,
+							'Winning_Company__c': com[0],
+							'Company_Short_Name__c': com[0],
+							'Published_Rating__c': record["metadata"]["lead_classifier"] * 100,
+							'RSS_PDF__c': pdf_url})
+		headers = {"Content-Type": "application/json", "Authorization": "Bearer " + sf_token}
+		r = requests.post(SF_URL+"v39.0/sobjects/Lead", headers=headers, data=data)
+		if r.status_code != 200 and r.status_code != 201:
+			error_message = "DEV ERROR during Lead creation in SalesForce"
+			print(error_message, r.text)
+			email_error(inputs["email_address"], title, record["metadata"]["publisher"], record["metadata"]["feed_name"], error_message)
+			raise Exception(error_message)
+		else:
+			# Gather SalesForce IDs
+			j = r.json()
+			salesforce_ids[re.sub(r'[ #\.,]',"_",com[0])] = j["id"]
+
+	# Update Discovery with Salesforce Lead IDs and timestamp
+	record["metadata"]["salesforce_ids"] = salesforce_ids
+	record["metadata"]["salesforce_timestamp"] = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+	UPDATE = "?version=2019-04-30"
+	files={"file": record["html"].encode('utf-8'), "metadata": json.dumps(record["metadata"])}
+	time_out = 5
+	attempts = 1
+	while True:
+		try:
+			r = requests.post(inputs["DISC_BASE_URL"] + inputs["COLLECTION_ID"] + "/documents/" + inputs["article_id"] + UPDATE, auth=(inputs["DISC_USER"], inputs["DISC_PASS"]), files=files)
+			r.raise_for_status()
+		except Exception as ex:
+			if attempts > 1:
+				print("DEV LEAD UPDATE TO DISCOVERY FAILED WITH STATUS CODE" + str(r.status_code) + ": " + str(ex))
+				print("FULL RESPONSE:",r.text)
+				print("METADATA:",record["metadata"])
+				raise
+			else:
+				print("Dev First Try Failure, Retrying in " + str(time_out) + "seconds to upload...")
+				time.sleep(time_out)
+				time_out = time_out ** 2
+				attempts += 1
+				continue
+		break
+	print("DEV LEAD UPDATE DISCOVERY RESULTS",r.text,"METADATA:",record["metadata"])
+	return {'message': "Successfully created lead"}
 
 # @DEV: Strips string of chars it can't handle and then encodes given string for safe usage in HTTP URLs
 # @PARAM: _to_encode - string to encode
@@ -352,7 +330,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 	sales_rep = ""
 	
 	try:
-		QUERY = "v23.0/query/?q=SELECT+Account_Id_18__c+from+Account+where+Name+like+'" + re.sub(r'\&','%26',re.sub(r"'", "\\'", publisher)) +"'"
+		QUERY = "v20.0/query/?q=SELECT+Account_Id_18__c+from+Account+where+Name+like+'" + re.sub(r'\&','%26',re.sub(r"'", "\\'", publisher)) +"'"
 		headers = {"Authorization": "Bearer " + sf_token}
 		r = requests.get(SF_URL+QUERY, headers=headers)
 		r.raise_for_status()
@@ -369,7 +347,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 		print("Got response but could not find publisher in SalesForce", err)
 	
 	try:
-		QUERY = "v23.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Name+like+'" + re.sub(r'\&','%26',re.sub(r"'","\\'", magazine)) +"'"
+		QUERY = "v20.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Name+like+'" + re.sub(r'\&','%26',re.sub(r"'","\\'", magazine)) +"'"
 		headers = {"Authorization": "Bearer " + sf_token}
 		r = requests.get(SF_URL+QUERY, headers=headers)
 		r.raise_for_status()
@@ -448,9 +426,8 @@ def build_pdf(record, cos_apikey):
 	if(get_logo(mag_logo, token)):
 		pdf.image(mag_logo+".png",h=15)
 	else:
-		#pdf.set_font('NotoSans', 'B', 20)
-		#pdf.cell(90,15,record["metadata"]["feed_name"],0,1,'L')
-		return False
+		pdf.set_font('NotoSans', 'B', 20)
+		pdf.cell(90,15,record["metadata"]["feed_name"],0,1,'L')
 	pdf.set_font('NotoSans', 'B', 18)
 	pdf.ln(10)
 	pdf.multi_cell(0,10, record["metadata"]["title"], align='C')
@@ -462,30 +439,8 @@ def build_pdf(record, cos_apikey):
 	else:
 		pdf.three_col = False
 		pdf.multi_cell(0,5,article)
-	pdf.output(record["id"]+'_base.pdf')
+	pdf.output(record["id"]+'.pdf')
 	return True
-	
-
-# @DEV: Adds watermark to PDF by merging with a watermark PDF
-# @PARAM: pdf_file - file name of base PDF file
-def merge_pdf(pdf_file):
-	watermark = "sample1.pdf"
-	input_file = open(pdf_file,'rb')
-	input_pdf = PyPDF2.PdfFileReader(pdf_file)
-	watermark_file = open(watermark,'rb')
-	watermark_pdf = PyPDF2.PdfFileReader(watermark_file)
-	
-	watermark_page = watermark_pdf.getPage(0)
-	output_pdf = PyPDF2.PdfFileWriter()
-	
-	for i in range(input_pdf.getNumPages()):
-		pdf_page = input_pdf.getPage(i)
-		pdf_page.mergePage(watermark_page)
-		output_pdf.addPage(pdf_page)
-	
-	output_filename = re.sub(r'_base','',pdf_file)
-	file = open(output_filename, 'wb')
-	output_pdf.write(file)
 
 
 # @DEV: Gets token for accessing Cloud Object Storage
@@ -532,9 +487,9 @@ def get_logo(logo_name, token):
 # @PARAM: sf_token - token to authenticate with Salesforce
 # @PARAM: sf_url - base URL for Salesforce
 # @PARAM: record - dictionary of article data
-# @PARAM: folder_id - Salesforce id of folder where PDF is uploaded
 # @RET: String of URL to Salesforce Document
-def salesforce_pdf(sf_token,sf_url,record,folder_id):
+def salesforce_pdf(sf_token,sf_url,record):
+	folder_id = "00l0f000002BOduAAG"
 	pdf_file = record['id']+'.pdf'
 	try:
 		QUERY = "v23.0/sobjects/Document/"
