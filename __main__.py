@@ -93,31 +93,32 @@ def lead_by_article(inputs):
 	if "entities" in record["enriched_text"] and len(record["enriched_text"]["entities"]) > 0:
 		# Go through each entity to pull out Company, Product, and Person entities. Exclude social media companies.
 		for entity in record["enriched_text"]["entities"]:
-			if (entity["type"] == "Company" or entity["type"] == "Organization")\
-					and not (re.search(r'[fF]acebook',entity["text"])) and entity["text"] != "Pinterest"\
-					and entity["text"] != "Twitter" and not (re.search(r'\bNast\b', entity["text"]))\
-					and not re.search(r'_', entity["text"]) and not (re.search(r'[lL]inked[Ii]n',entity["text"]))\
-					and not (re.search(r'[rR]eddit',entity["text"])) and not (re.search(r'[tT]umblr',entity["text"]))\
-					and not (re.search(r'[aA]mazon',entity["text"])) and not (re.search(r'[yY]ou[tT]ube',entity["text"]))\
-					and not (re.search(r'[Ii]nstagram',entity["text"])) and entity["text"] != record["metadata"]["publisher"]\
-					and entity["text"] != record["metadata"]["feed_name"]:
-				if entity["text"] in map_entities:
-					map_entities[entity["text"]][0] += float(entity["sentiment"]["score"])
-					map_entities[entity["text"]][1] += 1
-				else:
-					map_entities[entity["text"]] = [float(entity["sentiment"]["score"]),1,entity["type"]]
-			if entity["type"] == "Product":
-				if entity["text"] in map_entities:
-					map_entities[entity["text"]][0] += float(entity["sentiment"]["score"])
-					map_entities[entity["text"]][1] += 1
-				else:
-					map_entities[entity["text"]] = [float(entity["sentiment"]["score"]),1,entity["type"]]
-			if entity["type"] == "Person":
-				if entity["text"] in map_entities:
-					map_entities[entity["text"]][0] += float(entity["sentiment"]["score"])
-					map_entities[entity["text"]][1] += 1
-				else:
-					map_entities[entity["text"]] = [float(entity["sentiment"]["score"]),1,entity["type"]]
+			if "sentiment" in entity:
+				if (entity["type"] == "Company" or entity["type"] == "Organization")\
+						and not (re.search(r'[fF]acebook',entity["text"])) and entity["text"] != "Pinterest"\
+						and entity["text"] != "Twitter" and not (re.search(r'\bNast\b', entity["text"]))\
+						and not re.search(r'_', entity["text"]) and not (re.search(r'[lL]inked[Ii]n',entity["text"]))\
+						and not (re.search(r'[rR]eddit',entity["text"])) and not (re.search(r'[tT]umblr',entity["text"]))\
+						and not (re.search(r'[aA]mazon',entity["text"])) and not (re.search(r'[yY]ou[tT]ube',entity["text"]))\
+						and not (re.search(r'[Ii]nstagram',entity["text"])) and entity["text"] != record["metadata"]["publisher"]\
+						and entity["text"] != record["metadata"]["feed_name"]:
+					if entity["text"] in map_entities:
+						map_entities[entity["text"]][0] += float(entity["sentiment"]["score"])
+						map_entities[entity["text"]][1] += 1
+					else:
+						map_entities[entity["text"]] = [float(entity["sentiment"]["score"]),1,entity["type"]]
+				if entity["type"] == "Product":
+					if entity["text"] in map_entities:
+						map_entities[entity["text"]][0] += float(entity["sentiment"]["score"])
+						map_entities[entity["text"]][1] += 1
+					else:
+						map_entities[entity["text"]] = [float(entity["sentiment"]["score"]),1,entity["type"]]
+				if entity["type"] == "Person":
+					if entity["text"] in map_entities:
+						map_entities[entity["text"]][0] += float(entity["sentiment"]["score"])
+						map_entities[entity["text"]][1] += 1
+					else:
+						map_entities[entity["text"]] = [float(entity["sentiment"]["score"]),1,entity["type"]]
 		
 		# Get average scores for each mention of unique entites
 		for key in map_entities.keys():
@@ -242,7 +243,32 @@ def lead_by_article(inputs):
 				j = r.json()
 				print("SQL DB RESULTS:",str(j))
 			except Exception as e:
-				print(inputs["SF_INSTANCE"].upper() + " SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + e.message)
+				print(inputs["SF_INSTANCE"].upper() + " SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + str(e))
+				print("PAYLOAD:",payload)
+				
+			try:
+				payload = { "article_title": record['metadata']['title'],
+							"article_publisher": record['metadata']['publisher'],
+							"article_magazine": record['metadata']['feed_name'],
+							"article_url": record['metadata']['url'],
+							"lead_classifier": record['metadata']['lead_classifier'],
+							"article_pubdate": record['metadata']['pub_date'],
+							"article_text": record['text'],
+							"salesforce_timestamp": record["metadata"]["salesforce_timestamp"],
+							"salesforce_id": record["metadata"]["salesforce_id"],
+							"discovery_id": record["id"],
+							"sentiment_score": record["metadata"]["sentiment_score"],
+							"emotion_score": str(record["enriched_text"]["emotion"]["document"]["emotion"]),
+							"entities": str(record["enriched_text"]["entities"]),
+							"id": int(record["metadata"]["sqldb_id_v2"])
+							}
+				params={'apikey': inputs["sql_db_apikey"]}
+				r = requests.put(inputs["sql_db_url_v2"], params=params, json=payload)
+				r.raise_for_status()
+				j = r.json()
+				print("SQL DB RESULTS:",str(j))
+			except Exception as e:
+				print(inputs["SF_INSTANCE"].upper() + " SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + str(e))
 				print("PAYLOAD:",payload)
 		return {'message': "Successfully created lead"}
 
