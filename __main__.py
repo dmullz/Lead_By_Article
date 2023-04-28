@@ -15,6 +15,7 @@ import re
 import time
 import smtplib, ssl
 import os
+import urllib.parse
 from datetime import timezone, datetime
 import fpdf
 from fpdf import FPDF
@@ -151,7 +152,7 @@ def lead_by_article(inputs):
 				product = ""
 			    
 	#Query Salesforce to find field IDs
-	ids = query_salesforce(record["metadata"]["publisher"], record["metadata"]["feed_name"],SF_URL,RF_URL,RF_KEY,RF_SECRET,RF_TOKEN)
+	ids = query_salesforce(record["metadata"]["publisher"],record["metadata"]["feed_name"],SF_URL,RF_URL,RF_KEY,RF_SECRET,RF_TOKEN)
 	pub_id = ids[0]
 	mag_id = ids[1]
 	sales_rep = ids[2]
@@ -162,6 +163,9 @@ def lead_by_article(inputs):
 		print(error_message)
 		#email_error(inputs["email_address"], record["metadata"]["title"], record["metadata"]["publisher"], record["metadata"]["feed_name"], error_message)
 		raise Exception(error_message)
+		
+	if record["metadata"]["feed_name"] == "What's the Best":
+		sales_rep = "00546000000zEH4"
 	
 	# Build SalesForce payload and create lead
 	data = json.dumps({"Company": featured_company,
@@ -169,7 +173,7 @@ def lead_by_article(inputs):
 						"LeadSource": "RSS Project",
 						"Rating": record["metadata"]["lead_classifier"] * 100,
 						"Description": "Title: " + title +
-									  "\nSentiment Score: " + str(record["enriched_text"]["sentiment"]["document"]["score"]) +
+									  "\nSentiment Score: " + str(record["metadata"]["sentiment_score"]) +
 									  "\nClassifier Score: " + str(record["metadata"]["lead_classifier"]) +
 									  "\nFeatured Product: " + product +
 									  "\nEntities:\n" + entity_output,
@@ -220,32 +224,7 @@ def lead_by_article(inputs):
 			break
 		print(inputs["SF_INSTANCE"].upper() + " LEAD UPDATE DISCOVERY RESULTS",r.text,"METADATA:",record["metadata"])
 		if inputs["sql_db_enabled"]:
-			# Update SQL DB with values from Discovery
-			try:
-				payload = { "article_title": record['metadata']['title'],
-							"article_publisher": record['metadata']['publisher'],
-							"article_magazine": record['metadata']['feed_name'],
-							"article_url": record['metadata']['url'],
-							"lead_classifier": record['metadata']['lead_classifier'],
-							"article_pubdate": record['metadata']['pub_date'],
-							"article_text": record['text'],
-							"salesforce_timestamp": record["metadata"]["salesforce_timestamp"],
-							"salesforce_id": record["metadata"]["salesforce_id"],
-							"discovery_id": record["id"],
-							"sentiment_score": record["metadata"]["sentiment_score"],
-							"emotion_score": str(record["enriched_text"]["emotion"]["document"]["emotion"]),
-							"entities": str(record["enriched_text"]["entities"]),
-							"id": int(record["metadata"]["sqldb_id"])
-							}
-				params={'apikey': inputs["sql_db_apikey"]}
-				r = requests.put(inputs["sql_db_url"], params=params, json=payload)
-				r.raise_for_status()
-				j = r.json()
-				print("SQL DB RESULTS:",str(j))
-			except Exception as e:
-				print(inputs["SF_INSTANCE"].upper() + " SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + str(e))
-				print("PAYLOAD:",payload)
-				
+			# Update SQL DB with values from Discovery			
 			try:
 				payload = { "article_title": record['metadata']['title'],
 							"article_publisher": record['metadata']['publisher'],
@@ -378,7 +357,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 	sales_rep = ""
 	
 	try:
-		QUERY = "v23.0/query/?q=SELECT+Account_Id_18__c+from+Account+where+Name+like+'" + re.sub(r'\&','%26',re.sub(r"'", "\\'", publisher)) +"'"
+		QUERY = "v23.0/query/?q=SELECT+Account_Id_18__c+from+Account+where+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'", "%27", publisher))) +"'"
 		headers = {"Authorization": "Bearer " + sf_token}
 		r = requests.get(SF_URL+QUERY, headers=headers)
 		r.raise_for_status()
@@ -395,7 +374,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 		print("Got response but could not find publisher in SalesForce", err)
 	
 	try:
-		QUERY = "v23.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Name+like+'" + re.sub(r'\&','%26',re.sub(r"'","\\'", magazine)) +"'"
+		QUERY = "v23.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'","\\'", magazine))) +"'"
 		headers = {"Authorization": "Bearer " + sf_token}
 		r = requests.get(SF_URL+QUERY, headers=headers)
 		r.raise_for_status()
