@@ -3,32 +3,23 @@
 #
 #
 # @param _SF_INSTANCE - string "dev" or "prod" to choose Salesforce configuration. Actual values are in lead_by_article() function below
-# @param _DISC_BASE_URL - Base endpoint for discovery
-# @param _COLLECTION_ID - ID of the Discovery Collection containing article information
-# @param _DISC_USER - Discovery API User Name (apikey)
-# @param _DISC_PASS - Discovery API Password  (apikey value)
 #
 import sys
 import requests
 import json
 import re
 import time
-import smtplib, ssl
 import os
 import urllib.parse
 from datetime import timezone, datetime
 import fpdf
 from fpdf import FPDF
 import PyPDF2
-from email.mime.application import MIMEApplication
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.utils import COMMASPACE, formatdate
 fpdf.set_global("SYSTEM_TTFONTS", os.path.join(os.path.dirname(__file__),'fonts'))
 
 
 
-# @DEV: Queries discovery by article ID and generate leads per company entity found in the article
+# @DEV: Queries SQL DB by article ID and generate leads per company entity found in the article
 # @PARAM: _article_id is the string id article you wish to target.
 # @RET: Returns a dict containing the success/failure of the lead generation
 def lead_by_article(inputs):
@@ -50,25 +41,11 @@ def lead_by_article(inputs):
 	# Get new SalesForce token
 	sf_token = get_token(RF_URL,RF_KEY,RF_SECRET,RF_TOKEN)
 	
-	try:
-		# Build query string for Discovery and store the result in _record_
-		QUERY = "/query?version=2018-12-03&filter=id%3A%3A" + inputs["article_id"] + "&deduplicate=false&highlight=true&passages=true&passages.count=5&query="
-		r = requests.get(inputs["DISC_BASE_URL"] + inputs["COLLECTION_ID"] + QUERY, auth=(inputs["DISC_USER"], inputs["DISC_PASS"]))
-		j = r.json()
-		#print(j)
-		if len(j["results"]) < 1 and "title_id" in inputs and "pub_date" in inputs:
-			encoded_string = url_encode(inputs["title_id"])
-			print("EXECUTING BACKUP QUERY BY PUB DATE & TITLE:", encoded_string)
-			QUERY = '/query?version=2018-12-03&filter=metadata.pub_date::' + str(inputs["pub_date"]) + '%2Cmetadata.title%3A"' + encoded_string + '"&deduplicate=false&highlight=true&passages=true&passages.count=5&query='
-			r = requests.get(inputs["DISC_BASE_URL"] + inputs["COLLECTION_ID"] + QUERY, auth=(inputs["DISC_USER"], inputs["DISC_PASS"]))
-			j= r.json()
-		record = j["results"][0]
-	except Exception as err:
-		error_message = inputs["SF_INSTANCE"].upper() + " ERROR attempting to query Discovery with article id: " + inputs["article_id"]
-		print(error_message, err)
-		print("JSON:",j)
-		#email_error(inputs["email_address"], "", "", "", error_message)
-		
+	# Query SQL DB for article
+	record = get_article_by_id(inputs["sql_db_url_v2"], inputs["article_id"], inputs["sql_db_apikey"])
+	if not "article_text" in record:
+		error_message = inputs["SF_INSTANCE"].upper() + " ARTICLE NOT FOUND IN SQL DB: " + inputs["article_id"]
+		print(error_message, err)		
 		raise
 	
 	pdf_url = ""
@@ -78,171 +55,65 @@ def lead_by_article(inputs):
 			email_pdf(record,inputs["email_address"])
 		pdf_url = salesforce_pdf(sf_token,SF_URL,record,SF_FOLDER)
 	
-	#print(record)
-	entity_output = ""
-	featured_company = "None"
-	source = record["metadata"]["feed_name"]
-	map_entities = {}
-	entities = []
-	companies = []
-	products = []
-	people = []
-	product = ""
-	title = record["metadata"]["title"]
-	date = record["metadata"]["pub_date"]
-	
-	if "entities" in record["enriched_text"] and len(record["enriched_text"]["entities"]) > 0:
-		# Go through each entity to pull out Company, Product, and Person entities. Exclude social media companies.
-		for entity in record["enriched_text"]["entities"]:
-			if "sentiment" in entity:
-				if (entity["type"] == "Company" or entity["type"] == "Organization")\
-						and not (re.search(r'[fF]acebook',entity["text"])) and entity["text"] != "Pinterest"\
-						and entity["text"] != "Twitter" and not (re.search(r'\bNast\b', entity["text"]))\
-						and not re.search(r'_', entity["text"]) and not (re.search(r'[lL]inked[Ii]n',entity["text"]))\
-						and not (re.search(r'[rR]eddit',entity["text"])) and not (re.search(r'[tT]umblr',entity["text"]))\
-						and not (re.search(r'[aA]mazon',entity["text"])) and not (re.search(r'[yY]ou[tT]ube',entity["text"]))\
-						and not (re.search(r'[Ii]nstagram',entity["text"])) and entity["text"] != record["metadata"]["publisher"]\
-						and entity["text"] != record["metadata"]["feed_name"]:
-					if entity["text"] in map_entities:
-						map_entities[entity["text"]][0] += float(entity["sentiment"]["score"])
-						map_entities[entity["text"]][1] += 1
-					else:
-						map_entities[entity["text"]] = [float(entity["sentiment"]["score"]),1,entity["type"]]
-				if entity["type"] == "Product":
-					if entity["text"] in map_entities:
-						map_entities[entity["text"]][0] += float(entity["sentiment"]["score"])
-						map_entities[entity["text"]][1] += 1
-					else:
-						map_entities[entity["text"]] = [float(entity["sentiment"]["score"]),1,entity["type"]]
-				if entity["type"] == "Person":
-					if entity["text"] in map_entities:
-						map_entities[entity["text"]][0] += float(entity["sentiment"]["score"])
-						map_entities[entity["text"]][1] += 1
-					else:
-						map_entities[entity["text"]] = [float(entity["sentiment"]["score"]),1,entity["type"]]
-		
-		# Get average scores for each mention of unique entites
-		for key in map_entities.keys():
-			if map_entities[key][2] == "Company" or map_entities[key][2] == "Organization":
-				companies.append((key, map_entities[key][0]/map_entities[key][1]))
-			if map_entities[key][2] == "Person":
-				people.append((key, map_entities[key][0]/map_entities[key][1]))
-			if map_entities[key][2] == "Product":
-				products.append((key, map_entities[key][0]/map_entities[key][1]))
-			entities.append((key, map_entities[key][0]/map_entities[key][1]))
-		
-		# Sort entity list by score
-		sorted_e = list(reversed(sorted(entities, key=lambda kv: kv[1])))
-		
-		# Build output string for Entity/Score pairs
-		for tup in sorted_e:
-			entity_output = entity_output + tup[0] + " : " + str(tup[1]) + "\n"
-		
-		# Sort companies and products to find the highest score for each type
-		if len(companies) > 0:
-			sorted_c = list(reversed(sorted(companies, key=lambda kv: kv[1])))
-			featured_company = sorted_c[0][0]
-		if len(products) > 0:
-			sorted_p = list(reversed(sorted(products, key=lambda kv: kv[1])))
-			product = sorted_p[0][0]
-		else:
-			if len(sorted_e) > 0:
-				product = sorted_e[0][0]
-			else:
-				product = ""
+	title = record["article_title"]
+	date = record=["article_pubdate"]
 			    
 	#Query Salesforce to find field IDs
-	ids = query_salesforce(record["metadata"]["publisher"],record["metadata"]["feed_name"],SF_URL,RF_URL,RF_KEY,RF_SECRET,RF_TOKEN)
+	ids = query_salesforce(record["article_publisher"],record["article_magazine"],SF_URL,RF_URL,RF_KEY,RF_SECRET,RF_TOKEN)
 	pub_id = ids[0]
 	mag_id = ids[1]
 	sales_rep = ids[2]
 	#print("SALES REP:", sales_rep)
 	
 	if mag_id == "":
-		error_message = inputs["SF_INSTANCE"].upper() + " ERROR finding magazine in SalesForce. PUB: " + record["metadata"]["publisher"] + " MAG: " + record["metadata"]["feed_name"]
+		error_message = inputs["SF_INSTANCE"].upper() + " ERROR finding magazine in SalesForce. PUB: " + record["article_publisher"] + " MAG: " + record["article_magazine"]
 		print(error_message)
-		#email_error(inputs["email_address"], record["metadata"]["title"], record["metadata"]["publisher"], record["metadata"]["feed_name"], error_message)
 		raise Exception(error_message)
 		
-	if record["metadata"]["feed_name"] == "What's the Best":
+	if record["article_magazine"] == "What's the Best":
 		sales_rep = "00546000000zEH4"
 	
 	# Build SalesForce payload and create lead
-	data = json.dumps({"Company": featured_company,
-						"LastName": "RSS Sentiment Analysis",
+	data = json.dumps({"LastName": "RSS Sentiment Analysis",
 						"LeadSource": "RSS Project",
-						"Rating": record["metadata"]["lead_classifier"] * 100,
+						"Rating": record["lead_classifier"] * 100,
 						"Description": "Title: " + title +
-									  "\nSentiment Score: " + str(record["metadata"]["sentiment_score"]) +
-									  "\nClassifier Score: " + str(record["metadata"]["lead_classifier"]) +
-									  "\nFeatured Product: " + product +
-									  "\nEntities:\n" + entity_output,
+									  "\nSentiment Score: " + str(record["sentiment_score"]) +
+									  "\nClassifier Score: " + str(record["lead_classifier"]),
 						'Sales_Rep__c': sales_rep,
 						'Magazine__c': mag_id,
-						'Web_Link__c': record["metadata"]["url"],
+						'Web_Link__c': record["article_url"],
 						'Magazine_Type__c': "Online",
 						'Publisher__c': pub_id,
-						'Issue_Date__c': time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(record["metadata"]["pub_date"]/1000)),
+						'Issue_Date__c': time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(record["article_pubdate"]/1000)),
 						'Article_Title__c': title,
-						'Featured_Product__c': product,
-						'Winning_Company__c': featured_company,
-						'Company_Short_Name__c': featured_company,
-						'Published_Rating__c': record["metadata"]["lead_classifier"] * 100,
+						'Published_Rating__c': record["lead_classifier"] * 100,
 						'RSS_PDF__c': pdf_url})
 	headers = {"Content-Type": "application/json", "Authorization": "Bearer " + sf_token}
 	r = requests.post(SF_URL+"v39.0/sobjects/Lead", headers=headers, data=data)
 	if r.status_code != 200 and r.status_code != 201:
-		error_message = inputs["SF_INSTANCE"].upper() + " ERROR during Lead creation in SalesForce. PUB: " + record["metadata"]["publisher"] + " MAG: " + record["metadata"]["feed_name"]
-		#email_error(inputs["email_address"], record["metadata"]["title"], record["metadata"]["publisher"], record["metadata"]["feed_name"], error_message)
+		error_message = inputs["SF_INSTANCE"].upper() + " ERROR during Lead creation in SalesForce. PUB: " + record["article_publisher"] + " MAG: " + record["article_magazine"]
 		raise Exception(error_message)
 	else:
-		# Update Discovery record with SalesForce Lead information
-		j = r.json()
-		print(inputs["SF_INSTANCE"].upper() + " LEAD CREATED WITH MAG:",record["metadata"]["feed_name"],"PUB:",record["metadata"]["publisher"],"TITLE:",title,"ID:", j["id"])
-		record["metadata"]["salesforce_id"] = j["id"]
-		record["metadata"]["salesforce_timestamp"] = str(int(datetime.now(tz=timezone.utc).timestamp() * 1000))
-		UPDATE = "?version=2019-04-30"
-		files={"file": record["html"].encode('utf-8'), "metadata": json.dumps(record["metadata"])}
-		time_out = 5
-		attempts = 1
-		while True:
-			try:
-				r = requests.post(inputs["DISC_BASE_URL"] + inputs["COLLECTION_ID"] + "/documents/" + inputs["article_id"] + UPDATE, auth=(inputs["DISC_USER"], inputs["DISC_PASS"]), files=files)
-				r.raise_for_status()
-			except Exception as ex:
-				if attempts > 1:
-					print(inputs["SF_INSTANCE"].upper() + " LEAD UPDATE TO DISCOVERY FAILED WITH STATUS CODE" + str(r.status_code) + ": " + ex)
-					print("FULL RESPONSE:",r.text)
-					print("METADATA:",record["metadata"])
-					raise
-				else:
-					print(inputs["SF_INSTANCE"].upper() + " First Try Failure, Retrying in " + str(time_out) + "seconds to upload...")
-					time.sleep(time_out)
-					time_out = time_out ** 2
-					attempts += 1
-					continue
-			break
-		print(inputs["SF_INSTANCE"].upper() + " LEAD UPDATE DISCOVERY RESULTS",r.text,"METADATA:",record["metadata"])
+		print(inputs["SF_INSTANCE"].upper() + " LEAD CREATED WITH MAG:",record["article_magazine"],"PUB:",record["article_publisher"],"TITLE:",title,"ID:", j["id"])
+		
 		if inputs["sql_db_enabled"]:
 			# Update SQL DB with values from Discovery			
 			try:
-				payload = { "article_title": record['metadata']['title'],
-							"article_publisher": record['metadata']['publisher'],
-							"article_magazine": record['metadata']['feed_name'],
-							"article_url": record['metadata']['url'],
-							"lead_classifier": record['metadata']['lead_classifier'],
-							"article_pubdate": record['metadata']['pub_date'],
-							"article_text": record['text'],
-							"salesforce_timestamp": record["metadata"]["salesforce_timestamp"],
-							"salesforce_id": record["metadata"]["salesforce_id"],
-							"discovery_id": record["id"],
-							"sentiment_score": record["metadata"]["sentiment_score"],
-							"emotion_score": str(record["enriched_text"]["emotion"]["document"]["emotion"]),
-							"entities": str(record["enriched_text"]["entities"]),
-							"id": int(record["metadata"]["sqldb_id_v2"])
+				payload = { "article_title": record['article_title'],
+							"article_publisher": record['article_publisher'],
+							"article_magazine": record['article_magazine'],
+							"article_url": record['article_url'],
+							"lead_classifier": record['lead_classifier'],
+							"article_pubdate": record['article_pubdate'],
+							"article_text": record['article_text'],
+							"salesforce_timestamp": record["salesforce_timestamp"],
+							"salesforce_id": record["salesforce_id"],
+							"sentiment_score": record["sentiment_score"],
+							"id": record["id"]
 							}
 				params={'apikey': inputs["sql_db_apikey"]}
-				r = requests.put(inputs["sql_db_url_v2"], params=params, json=payload)
+				r = requests.put(inputs["sql_db_url_v2"] + 'v2/update-article', params=params, json=payload)
 				r.raise_for_status()
 				j = r.json()
 				print("SQL DB RESULTS:",str(j))
@@ -280,57 +151,16 @@ def url_encode(_to_encode):
 	return encoded_string
 
 
-# @DEV: Emails information about any errors to a designated address
-# @PARAM: _publisher is the string of the publisher
-# @PARAM: _magazine is the string of the magazine
-# @PARAM: title is the string of the title
-# @PARAM addr is the recipient's email address
-# @PARAM error_message is a string describing the error encountered
-def email_error(addr, title, publisher, magazine, error_message):
-	port = 465
-	smtp_server = "smtp.gmail.com"
-	sender_email = "WM.RSS.mailer@gmail.com"
-	receiver_email = addr
-	password = "WMmai1B0t!"
-	message = """Subject: RSS Feed Lead Error
-
-	An error occurred during lead generation."""
-	message = message + "\n\nERROR MESSAGE: " + error_message + "\n\nTITLE: " + title + "\nPUBLISHER: " + publisher + "\nMAGAZINE: " + magazine
-
-	context = ssl.create_default_context()
-	with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
-		server.login(sender_email, password)
-		server.sendmail(sender_email, receiver_email, message)
+def get_article_by_id(article_id, url, apikey):
+	params = {"apikey": apikey, "id": article_id}
+	try:
+		r = requests.get(url + 'v2/get-article-by-id', params=params)
+		r.raise_for_status()
+		return r.json()
+	except Exception as ex:
+		print("*** ERROR FINDING ARTICLE IN SQL DB ***", str(ex))
+		return {}
 		
-		
-# @DEV: Emails Lead pdf to a designated address
-# @PARAM: _record is the article data
-def email_pdf(record, addr):
-	msg = MIMEMultipart()
-	msg['From'] = "WM.RSS.mailer@gmail.com"
-	msg['To'] = addr
-	msg['Date'] = formatdate(localtime=True)
-	msg['Subject'] = "New Lead PDF"
-	message = """Attached is the Lead for the following Article"""
-	message = message + "\n\nTITLE: " + record["metadata"]["title"] + "\nPUBLISHER: " + record["metadata"]["publisher"] + "\nMAGAZINE: " + record["metadata"]["feed_name"]
-	msg.attach(MIMEText(message))
-	with open(record['id'] + '.pdf', "rb") as f:
-		part = MIMEApplication(
-			f.read(),
-			Name=record['id']+'.pdf'
-		)
-	part['Content-Disposition'] = 'attachment; filename="%s"' % record['id']+'.pdf'
-	msg.attach(part)
-	port = 465
-	smtp_server = "smtp.gmail.com"
-	sender_email = "WM.RSS.mailer@gmail.com"
-	receiver_email = addr
-	password = "WMmai1B0t!"
-
-	context = ssl.create_default_context()
-	with smtplib.SMTP_SSL(smtp_server, port, context=context) as server:
-		server.login(sender_email, password)
-		server.sendmail(sender_email, receiver_email, msg.as_string())
 
 # @DEV: Gets a refreshed access token to SalesForce
 # @PARAM _RF_KEY Salesforce Refresh Key
@@ -437,28 +267,28 @@ def remove_non_ascii(text):
 # @PARAM: cos_apikey - Cloud Object Storage apikey
 # @RET: Boolean of success or failure of PDF building
 def build_pdf(record, cos_apikey):
-	article = re.sub(r"no title\s*\n*", "", remove_non_ascii(record['text']))
+	article = re.sub(r"no title\s*\n*", "", remove_non_ascii(record['article_text']))
 	if(len(article)<10):
 		return False
 	wm_logo = "wm-logo"
-	mag_logo = re.sub(r'[^\w\.\-]','',record["metadata"]["feed_name"]).lower()
+	mag_logo = re.sub(r'[^\w\.\-]','',record["article_magazine"]).lower()
 	token = get_cos_token(cos_apikey)
 	pdf = PDF()
 	pdf.add_font("NotoSans", style="", fname="NotoSans-Regular.ttf", uni=True)
 	pdf.add_font("NotoSans", style="B", fname="NotoSans-Bold.ttf", uni=True)
 	pdf.add_font("NotoSans", style="I", fname="NotoSans-Italic.ttf", uni=True)
 	pdf.add_font("NotoSans", style="BI", fname="NotoSans-BoldItalic.ttf", uni=True)
-	pdf.publisher = record['metadata']['publisher']
+	pdf.publisher = record['article_publisher']
 	pdf.add_page()
 	if(get_logo(mag_logo, token)):
 		pdf.image(mag_logo+".png",h=15)
 	else:
 		#pdf.set_font('NotoSans', 'B', 20)
-		#pdf.cell(90,15,record["metadata"]["feed_name"],0,1,'L')
+		#pdf.cell(90,15,record["article_magazine"],0,1,'L')
 		return False
 	pdf.set_font('NotoSans', 'B', 18)
 	pdf.ln(10)
-	pdf.multi_cell(0,10, record["metadata"]["title"], align='C')
+	pdf.multi_cell(0,10, record["article_title"], align='C')
 	pdf.ln(5)
 	pdf.y0 = pdf.get_y()
 	pdf.set_font("NotoSans", size=10)
