@@ -43,20 +43,24 @@ def lead_by_article(inputs):
 	
 	# Query SQL DB for article
 	record = get_article_by_id(inputs["sql_db_url_v2"], inputs["article_id"], inputs["sql_db_apikey"])
+	print(record)
 	if not "article_text" in record:
-		error_message = inputs["SF_INSTANCE"].upper() + " ARTICLE NOT FOUND IN SQL DB: " + inputs["article_id"]
-		print(error_message, err)		
-		raise
+		error_message = inputs["SF_INSTANCE"].upper() + " ARTICLE NOT FOUND IN SQL DB: " + str(inputs["article_id"])
+		print(error_message)
+		raise Exception(error_message)
+	
+	if record["salesforce_id"] is not None:
+		return {'message': "Lead Already Exists for article: " + str(inputs["article_id"])}
 	
 	pdf_url = ""
 	if(build_pdf(record,inputs["COS_APIKEY"])):
-		merge_pdf(record["id"]+'_base.pdf')
+		merge_pdf(str(record["articleid"])+'_base.pdf')
 		if inputs["SF_INSTANCE"] == "dev":
 			email_pdf(record,inputs["email_address"])
 		pdf_url = salesforce_pdf(sf_token,SF_URL,record,SF_FOLDER)
 	
 	title = record["article_title"]
-	date = record=["article_pubdate"]
+	date = record["article_pubdate"]
 			    
 	#Query Salesforce to find field IDs
 	ids = query_salesforce(record["article_publisher"],record["article_magazine"],SF_URL,RF_URL,RF_KEY,RF_SECRET,RF_TOKEN)
@@ -74,53 +78,66 @@ def lead_by_article(inputs):
 		sales_rep = "00546000000zEH4"
 	
 	# Build SalesForce payload and create lead
-	data = json.dumps({"LastName": "RSS Sentiment Analysis",
-						"LeadSource": "RSS Project",
-						"Rating": record["lead_classifier"] * 100,
-						"Description": "Title: " + title +
-									  "\nSentiment Score: " + str(record["sentiment_score"]) +
-									  "\nClassifier Score: " + str(record["lead_classifier"]),
-						'Sales_Rep__c': sales_rep,
-						'Magazine__c': mag_id,
-						'Web_Link__c': record["article_url"],
-						'Magazine_Type__c': "Online",
-						'Publisher__c': pub_id,
-						'Issue_Date__c': time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(record["article_pubdate"]/1000)),
-						'Article_Title__c': title,
-						'Published_Rating__c': record["lead_classifier"] * 100,
-						'RSS_PDF__c': pdf_url})
-	headers = {"Content-Type": "application/json", "Authorization": "Bearer " + sf_token}
-	r = requests.post(SF_URL+"v39.0/sobjects/Lead", headers=headers, data=data)
-	if r.status_code != 200 and r.status_code != 201:
-		error_message = inputs["SF_INSTANCE"].upper() + " ERROR during Lead creation in SalesForce. PUB: " + record["article_publisher"] + " MAG: " + record["article_magazine"]
-		raise Exception(error_message)
-	else:
-		print(inputs["SF_INSTANCE"].upper() + " LEAD CREATED WITH MAG:",record["article_magazine"],"PUB:",record["article_publisher"],"TITLE:",title,"ID:", j["id"])
+	sf_response = {}
+	try:
+		data = json.dumps({"Company": "TBD",
+							"LastName": "RSS Sentiment Analysis",
+							"LeadSource": "RSS Project",
+							"Rating": record["lead_classifier"] * 100,
+							"Description": "Title: " + title +
+										  "\nSentiment Score: " + str(record["sentiment_score"]) +
+										  "\nClassifier Score: " + str(record["lead_classifier"]),
+							'Sales_Rep__c': sales_rep,
+							'Magazine__c': mag_id,
+							'Web_Link__c': record["article_url"],
+							'Magazine_Type__c': "Online",
+							'Publisher__c': pub_id,
+							'Issue_Date__c': time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(record["article_pubdate"]/1000)),
+							'Article_Title__c': title,
+							'Featured_Product__c': record["article_magazine"],
+							'Winning_Company__c': "TBD",
+							'Company_Short_Name__c': "TBD",
+							'Published_Rating__c': record["lead_classifier"] * 100,
+							'RSS_PDF__c': pdf_url})
+		print("SF DATA:",data)
+		headers = {"Content-Type": "application/json", "Authorization": "Bearer " + sf_token}
+		r = requests.post(SF_URL+"v39.0/sobjects/Lead", headers=headers, data=data)
+		r.raise_for_status()
+		sf_response = r.json()
+	except Exception as e:
+		print(inputs["SF_INSTANCE"].upper() + " ERROR during Lead creation in SalesForce. PUB: " + record["article_publisher"] + " MAG: " + record["article_magazine"])
+		print("CODE: " + str(r.status_code) + " SF ERROR MESSAGE: " + str(e))
+		raise
+	
+	print(inputs["SF_INSTANCE"].upper() + " LEAD CREATED WITH MAG:",record["article_magazine"],"PUB:",record["article_publisher"],"TITLE:",title,"ID:", sf_response["id"])
 		
-		if inputs["sql_db_enabled"]:
-			# Update SQL DB with values from Discovery			
-			try:
-				payload = { "article_title": record['article_title'],
-							"article_publisher": record['article_publisher'],
-							"article_magazine": record['article_magazine'],
-							"article_url": record['article_url'],
-							"lead_classifier": record['lead_classifier'],
-							"article_pubdate": record['article_pubdate'],
-							"article_text": record['article_text'],
-							"salesforce_timestamp": record["salesforce_timestamp"],
-							"salesforce_id": record["salesforce_id"],
-							"sentiment_score": record["sentiment_score"],
-							"id": record["id"]
-							}
-				params={'apikey': inputs["sql_db_apikey"]}
-				r = requests.put(inputs["sql_db_url_v2"] + 'v2/update-article', params=params, json=payload)
-				r.raise_for_status()
-				j = r.json()
-				print("SQL DB RESULTS:",str(j))
-			except Exception as e:
-				print(inputs["SF_INSTANCE"].upper() + " SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + str(e))
-				print("PAYLOAD:",payload)
-		return {'message': "Successfully created lead"}
+	if inputs["sql_db_enabled"]:
+		# Update SQL DB with values from Discovery			
+		try:
+			payload = { "article_title": record['article_title'],
+						"article_publisher": record['article_publisher'],
+						"article_magazine": record['article_magazine'],
+						"article_url": record['article_url'],
+						"lead_classifier": record['lead_classifier'],
+						"article_pubdate": record['article_pubdate'],
+						"article_text": record['article_text'],
+						"salesforce_timestamp": str(int(datetime.now(tz=timezone.utc).timestamp() * 1000)),
+						"salesforce_id": sf_response["id"],
+						"sentiment_score": record["sentiment_score"],
+						"id": inputs["article_id"],
+						"discovery_id": 0,
+						"emotion_score": 0.0,
+						"entities": ""
+						}
+			params={'apikey': inputs["sql_db_apikey"]}
+			r = requests.put(inputs["sql_db_url_v2"] + 'v2/update-article', params=params, json=payload)
+			r.raise_for_status()
+			j = r.json()
+			print("SQL DB RESULTS:",str(j))
+		except Exception as e:
+			print(inputs["SF_INSTANCE"].upper() + " SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + str(e))
+			print("PAYLOAD:",payload)
+	return {'message': "Successfully created lead"}
 
 # @DEV: Strips string of chars it can't handle and then encodes given string for safe usage in HTTP URLs
 # @PARAM: _to_encode - string to encode
@@ -151,12 +168,12 @@ def url_encode(_to_encode):
 	return encoded_string
 
 
-def get_article_by_id(article_id, url, apikey):
+def get_article_by_id(url,article_id,apikey):
 	params = {"apikey": apikey, "id": article_id}
 	try:
 		r = requests.get(url + 'v2/get-article-by-id', params=params)
 		r.raise_for_status()
-		return r.json()
+		return r.json()[0]
 	except Exception as ex:
 		print("*** ERROR FINDING ARTICLE IN SQL DB ***", str(ex))
 		return {}
@@ -297,7 +314,7 @@ def build_pdf(record, cos_apikey):
 	else:
 		pdf.three_col = False
 		pdf.multi_cell(0,5,article)
-	pdf.output(record["id"]+'_base.pdf')
+	pdf.output(str(record["articleid"])+'_base.pdf')
 	return True
 	
 
@@ -370,14 +387,14 @@ def get_logo(logo_name, token):
 # @PARAM: folder_id - Salesforce id of folder where PDF is uploaded
 # @RET: String of URL to Salesforce Document
 def salesforce_pdf(sf_token,sf_url,record,folder_id):
-	pdf_file = record['id']+'.pdf'
+	pdf_file = str(record['articleid'])+'.pdf'
 	try:
 		QUERY = "v23.0/sobjects/Document/"
 		headers = {"Authorization": "Bearer " + sf_token}
 		data = {"Description" : "Automatically generated article PDF",
 				"Keywords" : "article,lead,pdf",
 				"FolderId" : folder_id,
-				"Name" : record["id"]+'.pdf',
+				"Name" : str(record["articleid"])+'.pdf',
 				"Type" : "pdf"
 				}
 		files = {"entity_document": (None,json.dumps(data),'application/json'), "Body": (pdf_file, open(pdf_file, 'rb'), 'application/pdf')}
