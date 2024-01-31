@@ -409,4 +409,11 @@ def salesforce_pdf(sf_token,sf_url,record,folder_id):
 
 def main(dict):
 	print("Lead By Article called with parameters:", str(dict))
-	return lead_by_article(dict)
+	result = lead_by_article(dict)
+	return {
+		"headers": {
+			"Content-Type": "application/json",
+		},
+		"statusCode": 200,
+		"body": result
+	}
