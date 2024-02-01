@@ -395,7 +395,6 @@ def main(dict):
 	print("Lead By Article called with parameters:", str(dict))
 	print("Lead By Article called with env variables:", str(os.environ))
 	inputs = os.environ
-	inputs["article_id"] = dict["article_id"]
 	result = lead_by_article(inputs)
 	return {
 		"headers": {
