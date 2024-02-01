@@ -2,7 +2,6 @@
 # author: David Mullen
 #
 #
-# @param _SF_INSTANCE - string "dev" or "prod" to choose Salesforce configuration. Actual values are in lead_by_article() function below
 #
 import sys
 import requests
@@ -23,23 +22,8 @@ fpdf.set_global("SYSTEM_TTFONTS", os.path.join(os.path.dirname(__file__),'fonts'
 # @PARAM: _article_id is the string id article you wish to target.
 # @RET: Returns a dict containing the success/failure of the lead generation
 def lead_by_article(inputs):
-	# define SF static values based on the instance flag
-	if inputs["SF_INSTANCE"] == "dev":
-		RF_URL = "https://test.salesforce.com/services/oauth2/token"
-		SF_URL = "https://wrightsmedia--wrightsdev.my.salesforce.com/services/data/"
-		SF_FOLDER = "00l0f000002BOduAAG"
-		RF_KEY = "3MVG93MGy9V8hF9P5tOvZXvSk6YdouzlN5M2wsFr82GfKPFAZK9G0v4Kt7WEyik2lLeW46_KwAhnK1NrUgSn4"
-		RF_SECRET = "3C0FFEE636183C52084EF72BCB823FEDE84BE5E8323AF9DFBEDA6F459AAB08E1"
-		RF_TOKEN = "5Aep861nwwtoVPEij_zqtjVW0Zq3uKlUCSmgu..M9IGINAjdRK_u13KrIkCEq2FohL5jPybG1zbq6eHNOrbrb_K"
-	if inputs["SF_INSTANCE"] == "prod":
-		RF_URL = "https://login.salesforce.com/services/oauth2/token"
-		SF_URL = "https://wrightsmedia.my.salesforce.com/services/data/"
-		SF_FOLDER = "00l6f000002O5eJ"
-		RF_KEY = "3MVG9i1HRpGLXp.rDSE.v3G1rnFU5MZ79Fw4x8PNSlHJOxc4O4rTr8kuRlr297VT_nzVuSwKE5EFC1iOUih4i"
-		RF_SECRET = "ECE599BE6185D483469DC9143C2E8C05FCE715CCD24FE3AE4021DB7A415754DB"
-		RF_TOKEN = "5Aep8612E5JLxJp3ET7HLynuJxh07GDEsxdUIDvzOit9LoccvM60Ym3.lyC8C3qGZdaa4_GropJQRLJ855EL4hr"
 	# Get new SalesForce token
-	sf_token = get_token(RF_URL,RF_KEY,RF_SECRET,RF_TOKEN)
+	sf_token = get_token(inputs["RF_URL"],inputs["RF_KEY"],inputs["RF_SECRET"],inputs["RF_TOKEN"])
 	
 	# Query SQL DB for article
 	record = get_article_by_id(inputs["sql_db_url_v2"], inputs["article_id"], inputs["sql_db_apikey"])
@@ -57,13 +41,13 @@ def lead_by_article(inputs):
 		merge_pdf(str(record["articleid"])+'_base.pdf')
 		if inputs["SF_INSTANCE"] == "dev":
 			email_pdf(record,inputs["email_address"])
-		pdf_url = salesforce_pdf(sf_token,SF_URL,record,SF_FOLDER)
+		pdf_url = salesforce_pdf(sf_token,inputs["SF_URL"],record,inputs["SF_FOLDER"])
 	
 	title = record["article_title"]
 	date = record["article_pubdate"]
 			    
 	#Query Salesforce to find field IDs
-	ids = query_salesforce(record["article_publisher"],record["article_magazine"],SF_URL,RF_URL,RF_KEY,RF_SECRET,RF_TOKEN)
+	ids = query_salesforce(record["article_publisher"],record["article_magazine"],inputs["SF_URL"],inputs["RF_URL"],inputs["RF_KEY"],inputs["RF_SECRET"],inputs["RF_TOKEN"])
 	pub_id = ids[0]
 	mag_id = ids[1]
 	sales_rep = ids[2]
@@ -101,7 +85,7 @@ def lead_by_article(inputs):
 							'RSS_PDF__c': pdf_url})
 		print("SF DATA:",data)
 		headers = {"Content-Type": "application/json", "Authorization": "Bearer " + sf_token}
-		r = requests.post(SF_URL+"v39.0/sobjects/Lead", headers=headers, data=data)
+		r = requests.post(inputs["SF_URL"]+"v39.0/sobjects/Lead", headers=headers, data=data)
 		r.raise_for_status()
 		sf_response = r.json()
 	except Exception as e:
@@ -409,7 +393,10 @@ def salesforce_pdf(sf_token,sf_url,record,folder_id):
 
 def main(dict):
 	print("Lead By Article called with parameters:", str(dict))
-	result = lead_by_article(dict)
+	print("Lead By Article called with env variables:", str(os.environ))
+	inputs = os.environ
+	inputs["article_id"] = dict["article_id"]
+	result = lead_by_article(inputs)
 	return {
 		"headers": {
 			"Content-Type": "application/json",
