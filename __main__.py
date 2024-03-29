@@ -15,6 +15,7 @@ from datetime import timezone, datetime
 import fpdf
 from fpdf import FPDF
 import PyPDF2
+from openai import OpenAI
 fpdf.set_global("SYSTEM_TTFONTS", os.path.join(os.path.dirname(__file__),'fonts'))
 
 
@@ -61,6 +62,12 @@ def lead_by_article(inputs):
 	
 	title = record["article_title"]
 	date = record["article_pubdate"]
+	
+	article_entities = ""
+	if "review" in title.lower():
+		article_entities = json.dumps(parse_entities(text, 1, False))
+	else:
+		article_entities = json.dumps(parse_entities(text, 5, False))
 			    
 	#Query Salesforce to find field IDs
 	ids = query_salesforce(record["article_publisher"],record["article_magazine"],SF_URL,RF_URL,RF_KEY,RF_SECRET,RF_TOKEN)
@@ -107,7 +114,12 @@ def lead_by_article(inputs):
 	except Exception as e:
 		print(inputs["SF_INSTANCE"].upper() + " ERROR during Lead creation in SalesForce. PUB: " + record["article_publisher"] + " MAG: " + record["article_magazine"])
 		print("CODE: " + str(r.status_code) + " SF ERROR MESSAGE: " + str(e))
-		raise
+	
+	if "id" not in sf_response:
+		if inputs["SF_INSTANCE"].upper() == "DEV":
+			sf_response["id"] = "1234567890"
+		else:
+			raise
 	
 	print(inputs["SF_INSTANCE"].upper() + " LEAD CREATED WITH MAG:",record["article_magazine"],"PUB:",record["article_publisher"],"TITLE:",title,"ID:", sf_response["id"])
 		
@@ -127,7 +139,7 @@ def lead_by_article(inputs):
 						"id": inputs["article_id"],
 						"discovery_id": 0,
 						"emotion_score": 0.0,
-						"entities": ""
+						"entities": article_entities
 						}
 			params={'apikey': inputs["sql_db_apikey"]}
 			r = requests.put(inputs["sql_db_url_v2"] + 'v2/update-article', params=params, json=payload)
@@ -177,6 +189,106 @@ def get_article_by_id(url,article_id,apikey):
 	except Exception as ex:
 		print("*** ERROR FINDING ARTICLE IN SQL DB ***", str(ex))
 		return {}
+		
+
+def add_single_product_company(o, j):
+	for k in j.keys():
+		if ("product" in k.lower() or "name" == k.lower()) and "company" not in k.lower():
+			if type(j[k]) is dict:
+				for k2 in j[k]:
+					if ("product" in k2.lower() or "name" == k2.lower()) and "company" not in k2.lower():
+						o["product"] = j[k][k2]
+					if "company" in k2.lower():
+						o["company"] = j[k][k2]
+			else:
+				o["product"] = j[k]
+		if "company" in k.lower():
+			if type(j[k]) is dict:
+				for k2 in j[k]:
+					if ("product" in k2.lower() or "name" == k2.lower()) and "company" not in k2.lower():
+						o["product"] = j[k][k2]
+					if "company" in k2.lower():
+						o["company"] = j[k][k2]
+			else:
+				o["company"] = j[k]
+	return o
+
+
+def parse_entities(text, n, debug=False):
+	MSGS = [
+		{"role": "system", "content": "You are a helpful assistant designed to output JSON using camel case."},
+		{"role": "user", "content": "Given the following article, please determine if the article reviews a list of products or primarily reviews a single product, and provide a confidence rating as a percentage for this determination. If the article reviews a list of products, provide a list of all company product pairs discussed. If the article primarily reviews a single product, provide the primary product discussed and the company associated with this product."},
+		{"role": "user", "content": text}
+	]
+	client = OpenAI(api_key="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")
+
+	response = client.chat.completions.create(
+		model="gpt-3.5-turbo-0125",
+		response_format={ "type": "json_object" },
+		messages=MSGS,
+		n=n
+	)
+	
+	if debug:
+		print(response.choices)
+	
+	if n == 1:
+		j = json.loads(response.choices[0].message.content)
+		output = {"articleType": "review","rawEntities": j}
+		if "analysis" in j:
+			return add_single_product_company(output, j["analysis"])
+		else:
+			return add_single_product_company(output, j)
+	
+	listCount = 0
+	reviewCount = 0
+	for c in response.choices:
+		j = json.loads(c.message.content)
+		is_list = False
+		for v in j.values():	
+			if type(v) is str and "list" in v.lower():
+				listCount = listCount + 1
+				is_list = True
+				break
+		if is_list == False:
+			reviewCount = reviewCount + 1
+			
+	if debug:
+		print("Review Count: " + str(reviewCount) + " List Count: " + str(listCount))
+	
+	if listCount > reviewCount:
+		o = {"articleType": "list", "companyProductPairs": []}
+		for c in response.choices:
+			j = json.loads(c.message.content)
+			for v in j.values():
+				if type(v) is str and "list" in v.lower():
+					o["rawEntities"] = j
+					for v in j.values():
+						if type(v) is list:
+							for p in v:
+								pair = {}
+								for k in p.keys():
+									if "product" in k.lower():
+										pair["product"] = p[k]
+									if "company" in k.lower():
+										pair["company"] = p[k]
+								o["companyProductPairs"].append(pair)
+							return o
+	else:
+		o = {"articleType": "review"}
+		for c in response.choices:
+			j = json.loads(c.message.content)
+			is_list = False
+			for v in j.values():
+				if type(v) is str and "list" in v.lower():
+					is_list = True
+					break
+			if is_list == False:
+				o["rawEntities"] = j
+				if "analysis" in j:
+					return add_single_product_company(o, j["analysis"])
+				else:
+					return add_single_product_company(o, j)
 		
 
 # @DEV: Gets a refreshed access token to SalesForce
