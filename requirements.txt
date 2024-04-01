@@ -1,3 +1,4 @@
 requests
 fpdf
 PyPDF2
+openai
