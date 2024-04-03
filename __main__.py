@@ -504,10 +504,11 @@ def salesforce_pdf(sf_token,sf_url,record,folder_id):
 		print("ERROR:", str(e))
 		return "" 
 
-def main(dict):
-	print("Lead By Article called with parameters:", str(dict))
+def main(params):
+	print("Lead By Article called with parameters:", str(params))
 	print("Lead By Article called with env variables:", str(os.environ))
 	inputs = os.environ
+	inputs.update(params)
 	result = lead_by_article(inputs)
 	return {
 		"headers": {
