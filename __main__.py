@@ -508,7 +508,7 @@ def main(params):
 	print("Lead By Article called with parameters:", str(params))
 	print("Lead By Article called with env variables:", str(os.environ))
 	inputs = os.environ
-	inputs.update(params)
+	inputs["article_id"] = params["article_id"]
 	result = lead_by_article(inputs)
 	return {
 		"headers": {
