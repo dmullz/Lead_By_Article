@@ -50,9 +50,9 @@ def lead_by_article(inputs):
 	# Parse Entities from article Text using Chat GPT
 	article_entities = {}
 	if "review" in record['article_title'].lower():
-		article_entities = json.dumps(parse_entities(record['article_text'], 1, False))
+		article_entities = json.dumps(parse_entities(record['article_text'], 1,inputs["CHAT_GPT_TOKEN"], False))
 	else:
-		article_entities = json.dumps(parse_entities(record['article_text'], 5, False))
+		article_entities = json.dumps(parse_entities(record['article_text'], 5,inputs["CHAT_GPT_TOKEN"], False))
 			    
 	#Query Salesforce to find field IDs
 	ids = query_salesforce(record["article_publisher"],record["article_magazine"],inputs["SF_URL"],inputs["RF_URL"],inputs["RF_KEY"],inputs["RF_SECRET"],inputs["RF_TOKEN"])
@@ -199,13 +199,13 @@ def add_single_product_company(o, j):
 	return o
 
 
-def parse_entities(text, n, debug=False):
+def parse_entities(text, n, CGPT_APIKEY, debug=False):
 	MSGS = [
 		{"role": "system", "content": "You are a helpful assistant designed to output JSON using camel case."},
 		{"role": "user", "content": "Given the following article, please determine if the article reviews a list of products or primarily reviews a single product, and provide a confidence rating as a percentage for this determination. If the article reviews a list of products, provide a list of all company product pairs discussed. If the article primarily reviews a single product, provide the primary product discussed and the company associated with this product."},
 		{"role": "user", "content": text}
 	]
-	client = OpenAI(api_key="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")
+	client = OpenAI(api_key=CGPT_APIKEY)
 
 	response = client.chat.completions.create(
 		model="gpt-3.5-turbo-0125",
