@@ -388,24 +388,20 @@ def build_pdf(record, cos_apikey):
 	mag_logo = re.sub(r'[^\w\.\-]','',record["article_magazine"]).lower()
 	token = get_cos_token(cos_apikey)
 	pdf = PDF()
-	pdf.add_font("NotoSans", style="", fname="NotoSans-Regular.ttf", uni=True)
-	pdf.add_font("NotoSans", style="B", fname="NotoSans-Bold.ttf", uni=True)
-	pdf.add_font("NotoSans", style="I", fname="NotoSans-Italic.ttf", uni=True)
-	pdf.add_font("NotoSans", style="BI", fname="NotoSans-BoldItalic.ttf", uni=True)
 	pdf.publisher = record['article_publisher']
 	pdf.add_page()
 	if(get_logo(mag_logo, token)):
 		pdf.image(mag_logo+".png",h=15)
 	else:
-		#pdf.set_font('NotoSans', 'B', 20)
+		#pdf.set_font('Helvetica', 'B', 20)
 		#pdf.cell(90,15,record["article_magazine"],0,1,'L')
 		return False
-	pdf.set_font('NotoSans', 'B', 18)
+	pdf.set_font('Helvetica', 'B', 18)
 	pdf.ln(10)
 	pdf.multi_cell(0,10, record["article_title"], align='C')
 	pdf.ln(5)
 	pdf.y0 = pdf.get_y()
-	pdf.set_font("NotoSans", size=10)
+	pdf.set_font("Helvetica", size=10)
 	if(len(article) > 3250):
 		pdf.multi_cell(60,5,article)
 	else:
