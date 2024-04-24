@@ -416,21 +416,22 @@ def build_pdf(record, cos_apikey):
 def merge_pdf(pdf_file):
 	watermark = "sample1.pdf"
 	input_file = open(pdf_file,'rb')
-	input_pdf = PyPDF2.PdfFileReader(pdf_file)
+	input_pdf = PyPDF2.PdfReader(pdf_file)
 	watermark_file = open(watermark,'rb')
-	watermark_pdf = PyPDF2.PdfFileReader(watermark_file)
+	watermark_pdf = PyPDF2.PdfReader(watermark_file)
 	
-	watermark_page = watermark_pdf.getPage(0)
-	output_pdf = PyPDF2.PdfFileWriter()
+	watermark_page = watermark_pdf.pages[0]
+	output_pdf = PyPDF2.PdfWriter()
 	
-	for i in range(input_pdf.getNumPages()):
-		pdf_page = input_pdf.getPage(i)
-		pdf_page.mergePage(watermark_page)
-		output_pdf.addPage(pdf_page)
+	for i in range(len(input_pdf.pages)):
+		pdf_page = input_pdf.pages[i]
+		pdf_page.merge_page(watermark_page)
+		output_pdf.add_page(pdf_page)
 	
 	output_filename = re.sub(r'_base','',pdf_file)
 	file = open(output_filename, 'wb')
 	output_pdf.write(file)
+
 
 
 # @DEV: Gets token for accessing Cloud Object Storage
