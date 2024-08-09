@@ -28,7 +28,7 @@ def lead_by_article(inputs):
 	
 	# Query SQL DB for article
 	record = get_article_by_id(inputs["sql_db_url_v2"], inputs["article_id"], inputs["sql_db_apikey"])
-	print(record)
+	#print(record)
 	if not "article_text" in record:
 		error_message = inputs["SF_INSTANCE"].upper() + " ARTICLE NOT FOUND IN SQL DB: " + str(inputs["article_id"])
 		print(error_message)
@@ -48,11 +48,11 @@ def lead_by_article(inputs):
 	date = record["article_pubdate"]
 	
 	# Parse Entities from article Text using Chat GPT
-	article_entities = {}
-	if "review" in record['article_title'].lower():
-		article_entities = json.dumps(parse_entities(record['article_text'], 1,inputs["CHAT_GPT_TOKEN"], False))
-	else:
-		article_entities = json.dumps(parse_entities(record['article_text'], 5,inputs["CHAT_GPT_TOKEN"], False))
+	article_entities = json.dumps(parse_entities(record['article_text'], 5,inputs["CHAT_GPT_TOKEN"], False))
+	#if "review" in record['article_title'].lower():
+	#	article_entities = json.dumps(parse_entities(record['article_text'], 1,inputs["CHAT_GPT_TOKEN"], False))
+	#else:
+	#	article_entities = json.dumps(parse_entities(record['article_text'], 5,inputs["CHAT_GPT_TOKEN"], False))
 			    
 	#Query Salesforce to find field IDs
 	ids = query_salesforce(record["article_publisher"],record["article_magazine"],inputs["SF_URL"],inputs["RF_URL"],inputs["RF_KEY"],inputs["RF_SECRET"],inputs["RF_TOKEN"])
@@ -91,7 +91,7 @@ def lead_by_article(inputs):
 							'Company_Short_Name__c': "TBD",
 							'Published_Rating__c': record["lead_classifier"] * 100,
 							'RSS_PDF__c': pdf_url})
-		print("SF DATA:",data)
+		#print("SF DATA:",data)
 		headers = {"Content-Type": "application/json", "Authorization": "Bearer " + sf_token}
 		r = requests.post(inputs["SF_URL"]+"v39.0/sobjects/Lead", headers=headers, data=data)
 		r.raise_for_status()
@@ -109,31 +109,43 @@ def lead_by_article(inputs):
 	print(inputs["SF_INSTANCE"].upper() + " LEAD CREATED WITH MAG:",record["article_magazine"],"PUB:",record["article_publisher"],"TITLE:",title,"ID:", sf_response["id"])
 		
 	if inputs["sql_db_enabled"]:
-		# Update SQL DB with values from Discovery			
-		try:
-			payload = { "article_title": record['article_title'],
-						"article_publisher": record['article_publisher'],
-						"article_magazine": record['article_magazine'],
-						"article_url": record['article_url'],
-						"lead_classifier": record['lead_classifier'],
-						"article_pubdate": record['article_pubdate'],
-						"article_text": record['article_text'],
-						"salesforce_timestamp": str(int(datetime.now(tz=timezone.utc).timestamp() * 1000)),
-						"salesforce_id": sf_response["id"],
-						"sentiment_score": record["sentiment_score"],
-						"id": inputs["article_id"],
-						"discovery_id": 0,
-						"emotion_score": 0.0,
-						"entities": article_entities
-						}
-			params={'apikey': inputs["sql_db_apikey"]}
-			r = requests.put(inputs["sql_db_url_v2"] + 'v2/update-article', params=params, json=payload)
-			r.raise_for_status()
-			j = r.json()
-			print("SQL DB RESULTS:",str(j))
-		except Exception as e:
-			print(inputs["SF_INSTANCE"].upper() + " SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + str(e))
-			print("PAYLOAD:",payload)
+		# Update SQL DB with values from Discovery
+		time_out = 5
+		attempts = 1
+		while True:
+			try:
+				payload = { "article_title": record['article_title'],
+							"article_publisher": record['article_publisher'],
+							"article_magazine": record['article_magazine'],
+							"article_url": record['article_url'],
+							"lead_classifier": record['lead_classifier'],
+							"article_pubdate": record['article_pubdate'],
+							"article_text": record['article_text'],
+							"salesforce_timestamp": str(int(datetime.now(tz=timezone.utc).timestamp() * 1000)),
+							"salesforce_id": sf_response["id"],
+							"sentiment_score": record["sentiment_score"],
+							"id": inputs["article_id"],
+							"discovery_id": 0,
+							"emotion_score": 0.0,
+							"entities": article_entities
+							}
+				params={'apikey': inputs["sql_db_apikey"]}
+				r = requests.put(inputs["sql_db_url_v2"] + 'v2/update-article', params=params, json=payload)
+				r.raise_for_status()
+				j = r.json()
+				print("SQL DB RESULTS:",str(j))
+			except Exception as e:
+				if attempts > 4:
+					print(inputs["SF_INSTANCE"].upper() + " SQL DB UPDATE FAILED WITH STATUS CODE" + str(r.status_code) + ": " + str(e))
+					print("PAYLOAD:",payload)
+					break
+				else:
+					time.sleep(time_out)
+					time_out = time_out * 2
+					attempts = attempts + 1
+					continue
+				
+			break
 	return {'message': "Successfully created lead"}
 
 # @DEV: Strips string of chars it can't handle and then encodes given string for safe usage in HTTP URLs
@@ -502,8 +514,8 @@ def salesforce_pdf(sf_token,sf_url,record,folder_id):
 		return "" 
 
 def main(params):
-	print("Lead By Article called with parameters:", str(params))
-	print("Lead By Article called with env variables:", str(os.environ))
+	#print("Lead By Article called with parameters:", str(params))
+	#print("Lead By Article called with env variables:", str(os.environ))
 	inputs = os.environ
 	inputs["article_id"] = params["article_id"]
 	print("Passing Article ID: ", inputs["article_id"])
@@ -513,5 +525,5 @@ def main(params):
 			"Content-Type": "application/json",
 		},
 		"statusCode": 200,
-		"body": result
+		"body": json.dumps(result)
 	}
