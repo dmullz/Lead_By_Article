@@ -93,7 +93,7 @@ def lead_by_article(inputs):
 							'RSS_PDF__c': pdf_url})
 		#print("SF DATA:",data)
 		headers = {"Content-Type": "application/json", "Authorization": "Bearer " + sf_token}
-		r = requests.post(inputs["SF_URL"]+"v39.0/sobjects/Lead", headers=headers, data=data)
+		r = requests.post(inputs["SF_URL"]+"v61.0/sobjects/Lead", headers=headers, data=data)
 		r.raise_for_status()
 		sf_response = r.json()
 	except Exception as e:
@@ -313,7 +313,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 	sales_rep = ""
 	
 	try:
-		QUERY = "v23.0/query/?q=SELECT+Account_Id_18__c+from+Account+where+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'", "%27", publisher))) +"'"
+		QUERY = "v61.0/query/?q=SELECT+Account_Id_18__c+from+Account+where+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'", "%27", publisher))) +"'"
 		headers = {"Authorization": "Bearer " + sf_token}
 		r = requests.get(SF_URL+QUERY, headers=headers)
 		r.raise_for_status()
@@ -330,7 +330,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 		print("Got response but could not find publisher in SalesForce", err)
 	
 	try:
-		QUERY = "v23.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'","\\'", magazine))) +"'"
+		QUERY = "v61.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'","\\'", magazine))) +"'"
 		headers = {"Authorization": "Bearer " + sf_token}
 		r = requests.get(SF_URL+QUERY, headers=headers)
 		r.raise_for_status()
@@ -495,7 +495,7 @@ def get_logo(logo_name, token):
 def salesforce_pdf(sf_token,sf_url,record,folder_id):
 	pdf_file = str(record['articleid'])+'.pdf'
 	try:
-		QUERY = "v23.0/sobjects/Document/"
+		QUERY = "v61.0/sobjects/Document/"
 		headers = {"Authorization": "Bearer " + sf_token}
 		data = {"Description" : "Automatically generated article PDF",
 				"Keywords" : "article,lead,pdf",
