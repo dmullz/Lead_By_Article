@@ -55,7 +55,11 @@ def lead_by_article(inputs):
 	#	article_entities = json.dumps(parse_entities(record['article_text'], 5,inputs["CHAT_GPT_TOKEN"], False))
 			    
 	#Query Salesforce to find field IDs
-	ids = query_salesforce(record["article_publisher"],record["article_magazine"],inputs["SF_URL"],inputs["RF_URL"],inputs["RF_KEY"],inputs["RF_SECRET"],inputs["RF_TOKEN"])
+	ids = []
+	if record["article_publisher"] == "The New York Times":
+		ids = query_salesforce(record["article_publisher"],"The New York Times",inputs["SF_URL"],inputs["RF_URL"],inputs["RF_KEY"],inputs["RF_SECRET"],inputs["RF_TOKEN"])
+	else:
+		ids = query_salesforce(record["article_publisher"],record["article_magazine"],inputs["SF_URL"],inputs["RF_URL"],inputs["RF_KEY"],inputs["RF_SECRET"],inputs["RF_TOKEN"])
 	pub_id = ids[0]
 	mag_id = ids[1]
 	sales_rep = ids[2]
