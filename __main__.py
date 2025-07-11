@@ -334,7 +334,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 		print("Got response but could not find publisher in SalesForce", err)
 	
 	try:
-		QUERY = "v61.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Publisher__c+=+'" + pub_id + "'+AND+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'","\\'", magazine))) +"'"
+		QUERY = "v61.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Inactive__c+=false+AND+Publisher__c+=+'" + pub_id + "'+AND+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'","\\'", magazine))) +"'"
 		headers = {"Authorization": "Bearer " + sf_token}
 		r = requests.get(SF_URL+QUERY, headers=headers)
 		r.raise_for_status()
