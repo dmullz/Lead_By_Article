@@ -317,24 +317,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 	sales_rep = ""
 	
 	try:
-		QUERY = "v61.0/query/?q=SELECT+Account_Id_18__c+from+Account+where+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'", "%27", publisher))) +"'"
-		headers = {"Authorization": "Bearer " + sf_token}
-		r = requests.get(SF_URL+QUERY, headers=headers)
-		r.raise_for_status()
-	except Exception as err:
-		print("ERROR QUERYING SF FOR PUB::",err)
-	try:
-		j = r.json()
-	except Exception as err:
-		print("ERROR PARSING RAW PUB SF RESPONSE:", r.text)
-	try:
-		if len(j["records"]) > 0 and len(j["records"]) < 2:
-			pub_id = j["records"][0]["Account_Id_18__c"]
-	except Exception as err:
-		print("Got response but could not find publisher in SalesForce", err)
-	
-	try:
-		QUERY = "v61.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c+from+Magazine__c+where+Inactive__c+=false+AND+Publisher__c+=+'" + pub_id + "'+AND+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'","\\'", magazine))) +"'"
+		QUERY = "v61.0/query/?q=SELECT+Magazine_ID__c+,+ID+,+Sales_Rep__c,Publisher__c+from+Magazine__c+where+Inactive__c+=false+AND+Name+like+'" + re.sub(r'\+','%2B',re.sub(r'\&','%26',re.sub(r"'","\\'", magazine))) +"'"
 		headers = {"Authorization": "Bearer " + sf_token}
 		r = requests.get(SF_URL+QUERY, headers=headers)
 		r.raise_for_status()
@@ -349,6 +332,7 @@ def query_salesforce(publisher, magazine, SF_URL, RF_URL, RF_KEY, RF_SECRET, RF_
 		if len(j["records"]) > 0 and len(j["records"]) < 2:
 			#print("magazine query output", j["records"][0])
 			mag_id = j["records"][0]["Id"]
+			pub_id = j["records"][0]["Publisher__c"]
 			sales_rep = j["records"][0]["Sales_Rep__c"]
 	except Exception as err:
 		print("Got response but could not find magazine in SalesForce", err, "RAW MAG QUERY RESPONSE:", r.text)
