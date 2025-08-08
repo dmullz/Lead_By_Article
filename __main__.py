@@ -73,6 +73,11 @@ def lead_by_article(inputs):
 	if record["article_magazine"] == "What's the Best":
 		sales_rep = "00546000000zEH4"
 	
+	mag_article_url = record["article_url"]
+	if len(mag_article_url) > 251:
+		mag_article_url = mag_article_url[:250]
+		
+	
 	# Build SalesForce payload and create lead
 	sf_response = {}
 	try:
@@ -85,7 +90,7 @@ def lead_by_article(inputs):
 										  "\nClassifier Score: " + str(record["lead_classifier"]),
 							'Sales_Rep__c': sales_rep,
 							'Magazine__c': mag_id,
-							'Web_Link__c': record["article_url"],
+							'Web_Link__c': mag_article_url,
 							'Magazine_Type__c': "Online",
 							'Publisher__c': pub_id,
 							'Issue_Date__c': time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(record["article_pubdate"]/1000)),
