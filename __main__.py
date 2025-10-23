@@ -48,7 +48,8 @@ def lead_by_article(inputs):
 	date = record["article_pubdate"]
 	
 	# Parse Entities from article Text using Chat GPT
-	article_entities = json.dumps(parse_entities(record['article_text'], 5,inputs["CHAT_GPT_TOKEN"], False))
+	#article_entities = json.dumps(parse_entities(record['article_text'], 5,inputs["CHAT_GPT_TOKEN"], False))
+	article_entities = ""
 	#if "review" in record['article_title'].lower():
 	#	article_entities = json.dumps(parse_entities(record['article_text'], 1,inputs["CHAT_GPT_TOKEN"], False))
 	#else:
