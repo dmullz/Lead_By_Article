@@ -305,7 +305,7 @@ def parse_entities(text, n, CGPT_APIKEY, debug=False):
 # @RET: Returns the refreshed access token
 def get_token(RF_URL,RF_KEY,RF_SECRET,RF_TOKEN):
 	params = {"grant_type": "refresh_token", "client_id": RF_KEY, "client_secret": RF_SECRET, "refresh_token": RF_TOKEN}
-	r = requests.get(RF_URL, params=params)
+	r = requests.post(RF_URL, params=params)
 	return r.json()["access_token"]
 	
 # @DEV: Queries Salesforce for publisher ID and magazine ID
